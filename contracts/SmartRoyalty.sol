@@ -69,4 +69,28 @@ contract SmartRoyalty {
 
         emit RoyaltyPaid(contentId, msg.value);
     }
+
+    /**
+     * @notice Returns royalty recipients and their shares for a given content ID
+     * @param contentId ID of the content
+     * @return recipients Array of recipient addresses
+     * @return shares Array of recipient shares in basis points
+     */
+    function getRoyaltyRecipients(uint256 contentId) 
+        external 
+        view 
+        returns (address[] memory recipients, uint256[] memory shares) 
+    {
+        RoyaltyRecipient[] storage royalties = contentRoyalties[contentId];
+        uint256 len = royalties.length;
+
+        recipients = new address[](len);
+        shares = new uint256[](len);
+
+        for (uint256 i = 0; i < len; ) {
+            recipients[i] = royalties[i].recipient;
+            shares[i] = royalties[i].share;
+            unchecked { ++i; }
+        }
+    }
 }
