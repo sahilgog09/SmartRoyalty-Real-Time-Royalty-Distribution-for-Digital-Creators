@@ -1,96 +1,77 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-/**
- * @title SmartRoyalty
- * @notice Splits incoming Ether among pre-configured royalty recipients.
- * @dev Public interface is unchanged: same events, funcs & mapping.
- */
 contract SmartRoyalty {
-    /* -------------------------------------------------------------------------- */
-    /*                                  Errors                                    */
-    /* -------------------------------------------------------------------------- */
-    error InputLengthMismatch();
-    error ZeroAddress();
-    error InvalidTotalShare();
-    error NoEtherSent();
-    error RecipientsNotConfigured();
+    /// @notice Basis point denominator (100% = 10000)
+    uint256 public constant MAX_BASIS_POINTS = 10000;
 
-    /* -------------------------------------------------------------------------- */
-    /*                                 Constants                                  */
-    /* -------------------------------------------------------------------------- */
-    uint256 private constant _BASIS_POINTS = 10_000; // 100 %
-
-    /* -------------------------------------------------------------------------- */
-    /*                               Data Structures                              */
-    /* -------------------------------------------------------------------------- */
+    /// @notice Stores royalty recipient and their share in basis points
     struct RoyaltyRecipient {
         address recipient;
-        uint256 share; // in basis points (10 000 = 100 %)
+        uint256 share;
     }
 
-    /// @dev Same public getter as before (contentRoyalties(contentId, idx))
-    mapping(uint256 => RoyaltyRecipient[]) public contentRoyalties;
+    /// @dev Maps content ID to its list of royalty recipients
+    mapping(uint256 => RoyaltyRecipient[]) private contentRoyalties;
 
-    /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
+    /// @notice Emitted when royalties are configured for a content ID
     event RoyaltyConfigured(uint256 indexed contentId);
+
+    /// @notice Emitted when royalty is paid for a content ID
     event RoyaltyPaid(uint256 indexed contentId, uint256 amount);
 
-    /* -------------------------------------------------------------------------- */
-    /*                              External Logic                                */
-    /* -------------------------------------------------------------------------- */
-
     /**
-     * @notice Configure the royalty split for a given contentId.
-     * @dev Reverts if input arrays differ in length, contain zero addresses,
-     *      or if the total share ≠ 10 000 bps.
+     * @notice Sets royalty recipients and their shares for a content ID
+     * @param contentId The unique ID of the content
+     * @param recipients Array of recipient addresses
+     * @param shares Array of shares in basis points (must sum to 10000)
      */
     function configureRoyalty(
         uint256 contentId,
         address[] calldata recipients,
         uint256[] calldata shares
     ) external {
-        uint256 n = recipients.length;
-        if (n != shares.length) revert InputLengthMismatch();
+        uint256 len = recipients.length;
+        require(len == shares.length, "Mismatch in array lengths");
+        require(len > 0, "No recipients provided");
 
-        // Clear any previous config
-        delete contentRoyalties[contentId];
+        uint256 totalShare = 0;
 
-        uint256 totalShare;
-        for (uint256 i; i < n; ) {
-            address receiver = recipients[i];
-            if (receiver == address(0)) revert ZeroAddress();
-
-            uint256 shareBps = shares[i];
-            contentRoyalties[contentId].push(
-                RoyaltyRecipient({recipient: receiver, share: shareBps})
-            );
-
-            totalShare += shareBps;
+        for (uint256 i = 0; i < len; ) {
+            require(recipients[i] != address(0), "Recipient cannot be zero address");
+            totalShare += shares[i];
             unchecked { ++i; }
         }
 
-        if (totalShare != _BASIS_POINTS) revert InvalidTotalShare();
+        require(totalShare == MAX_BASIS_POINTS, "Total shares must be 10000");
+
+        // Clear previous royalty configuration
+        delete contentRoyalties[contentId];
+
+        for (uint256 i = 0; i < len; ) {
+            contentRoyalties[contentId].push(
+                RoyaltyRecipient({recipient: recipients[i], share: shares[i]})
+            );
+            unchecked { ++i; }
+        }
 
         emit RoyaltyConfigured(contentId);
     }
 
     /**
-     * @notice Split the incoming Ether among the configured recipients.
+     * @notice Pays out royalties based on the configuration for a content ID
+     * @param contentId The ID of the content
      */
     function payRoyalty(uint256 contentId) external payable {
-        if (msg.value == 0) revert NoEtherSent();
+        require(msg.value > 0, "No Ether sent");
 
-        RoyaltyRecipient[] storage list = contentRoyalties[contentId];
-        uint256 n = list.length;
-        if (n == 0) revert RecipientsNotConfigured();
+        RoyaltyRecipient[] storage recipients = contentRoyalties[contentId];
+        uint256 len = recipients.length;
+        require(len > 0, "No royalty recipients configured");
 
-        for (uint256 i; i < n; ) {
-            RoyaltyRecipient storage info = list[i];
-            uint256 payment = (msg.value * info.share) / _BASIS_POINTS;
-            payable(info.recipient).transfer(payment);
+        for (uint256 i = 0; i < len; ) {
+            uint256 payment = (msg.value * recipients[i].share) / MAX_BASIS_POINTS;
+            payable(recipients[i].recipient).transfer(payment);
             unchecked { ++i; }
         }
 
@@ -98,25 +79,25 @@ contract SmartRoyalty {
     }
 
     /**
-     * @notice View helper returning all recipients and shares for a contentId.
+     * @notice Returns royalty recipients and their shares for a given content ID
+     * @param contentId The ID of the content
+     * @return recipients Array of recipient addresses
+     * @return shares Array of recipient shares
      */
-    function getRoyaltyRecipients(
-        uint256 contentId
-    )
+    function getRoyaltyRecipients(uint256 contentId)
         external
         view
         returns (address[] memory recipients, uint256[] memory shares)
     {
-        RoyaltyRecipient[] storage list = contentRoyalties[contentId];
-        uint256 n = list.length;
+        RoyaltyRecipient[] storage royalties = contentRoyalties[contentId];
+        uint256 len = royalties.length;
 
-        recipients = new address[](n);
-        shares     = new uint256[](n);
+        recipients = new address[](len);
+        shares = new uint256[](len);
 
-        for (uint256 i; i < n; ) {
-            RoyaltyRecipient storage info = list[i];
-            recipients[i] = info.recipient;
-            shares[i]     = info.share;
+        for (uint256 i = 0; i < len; ) {
+            recipients[i] = royalties[i].recipient;
+            shares[i] = royalties[i].share;
             unchecked { ++i; }
         }
     }
