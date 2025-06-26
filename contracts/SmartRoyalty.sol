@@ -20,6 +20,9 @@ contract SmartRoyalty {
     /// @notice Emitted when royalty payment is distributed
     event RoyaltiesPaid(uint256 indexed contentId, uint256 amount);
 
+    /// @notice Emitted when a recipient address is updated
+    event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
+
     /**
      * @notice Configure royalties for a given content ID
      * @param contentId Unique identifier for the content
@@ -99,5 +102,37 @@ contract SmartRoyalty {
             shares[i] = dist[i].share;
             unchecked { ++i; }
         }
+    }
+
+    /**
+     * @notice Update the recipient address for a specific content ID
+     * @param contentId Unique identifier for the content
+     * @param oldRecipient The current recipient address to be updated
+     * @param newRecipient The new recipient address
+     */
+    function updateRoyaltyRecipient(
+        uint256 contentId,
+        address oldRecipient,
+        address newRecipient
+    ) external {
+        require(newRecipient != address(0), "Invalid new recipient");
+
+        RoyaltyInfo[] storage dist = royalties[contentId];
+        uint256 count = dist.length;
+        require(count > 0, "No royalty configuration");
+
+        bool updated = false;
+        for (uint256 i = 0; i < count; ) {
+            if (dist[i].recipient == oldRecipient) {
+                require(msg.sender == oldRecipient, "Only current recipient can update");
+                dist[i].recipient = newRecipient;
+                emit RecipientUpdated(contentId, oldRecipient, newRecipient);
+                updated = true;
+                break;
+            }
+            unchecked { ++i; }
+        }
+
+        require(updated, "Recipient not found");
     }
 }
