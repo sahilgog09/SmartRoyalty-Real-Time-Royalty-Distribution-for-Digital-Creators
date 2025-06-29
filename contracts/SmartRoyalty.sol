@@ -6,7 +6,7 @@ contract SmartRoyalty {
 
     struct RoyaltyInfo {
         address recipient;
-        uint256 share; // in basis points
+        uint256 share;
     }
 
     mapping(uint256 => RoyaltyInfo[]) private royalties;
@@ -20,42 +20,39 @@ contract SmartRoyalty {
         address[] calldata recipients,
         uint256[] calldata shares
     ) external {
-        uint256 count = recipients.length;
-        require(count == shares.length, "Mismatched input lengths");
-        require(count > 0, "At least one recipient required");
+        uint256 len = recipients.length;
+        require(len == shares.length && len > 0, "Invalid input");
 
-        uint256 totalShare;
-        for (uint256 i = 0; i < count; ++i) {
-            address recipient = recipients[i];
-            uint256 share = shares[i];
-            require(recipient != address(0), "Invalid recipient");
-            totalShare += share;
-        }
-        require(totalShare == BASIS_POINTS, "Total shares must equal 10000");
+        uint256 total;
+        delete royalties[contentId]; // gas-efficient way to overwrite
 
-        delete royalties[contentId];
-        RoyaltyInfo[] storage list = royalties[contentId];
-        for (uint256 i = 0; i < count; ++i) {
-            list.push(RoyaltyInfo(recipients[i], shares[i]));
+        RoyaltyInfo[] storage dist = royalties[contentId];
+        for (uint256 i; i < len; ++i) {
+            address r = recipients[i];
+            uint256 s = shares[i];
+            require(r != address(0), "Zero address");
+            total += s;
+            dist.push(RoyaltyInfo(r, s));
         }
 
+        require(total == BASIS_POINTS, "Total ≠ 10000");
         emit RoyaltiesSet(contentId);
     }
 
     function payRoyalties(uint256 contentId) external payable {
-        uint256 amount = msg.value;
-        require(amount > 0, "No payment sent");
+        require(msg.value > 0, "No payment");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 count = dist.length;
-        require(count > 0, "No royalty configuration");
+        require(dist.length > 0, "No royalties set");
 
-        for (uint256 i = 0; i < count; ++i) {
-            uint256 shareAmount = (amount * dist[i].share) / BASIS_POINTS;
-            payable(dist[i].recipient).transfer(shareAmount);
+        uint256 value = msg.value;
+        for (uint256 i; i < dist.length; ++i) {
+            uint256 payout = (value * dist[i].share) / BASIS_POINTS;
+            (bool success, ) = dist[i].recipient.call{value: payout}("");
+            require(success, "Transfer failed");
         }
 
-        emit RoyaltiesPaid(contentId, amount);
+        emit RoyaltiesPaid(contentId, value);
     }
 
     function getRoyalties(uint256 contentId)
@@ -64,14 +61,15 @@ contract SmartRoyalty {
         returns (address[] memory recipients, uint256[] memory shares)
     {
         RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 count = dist.length;
+        uint256 len = dist.length;
 
-        recipients = new address[](count);
-        shares = new uint256[](count);
+        recipients = new address[](len);
+        shares = new uint256[](len);
 
-        for (uint256 i = 0; i < count; ++i) {
-            recipients[i] = dist[i].recipient;
-            shares[i] = dist[i].share;
+        for (uint256 i; i < len; ++i) {
+            RoyaltyInfo storage r = dist[i];
+            recipients[i] = r.recipient;
+            shares[i] = r.share;
         }
     }
 
@@ -80,15 +78,13 @@ contract SmartRoyalty {
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "Invalid new recipient");
+        require(newRecipient != address(0), "Zero address");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 count = dist.length;
-        require(count > 0, "No royalty configuration");
 
-        for (uint256 i = 0; i < count; ++i) {
+        for (uint256 i; i < dist.length; ++i) {
             if (dist[i].recipient == oldRecipient) {
-                require(msg.sender == oldRecipient, "Only current recipient can update");
+                require(msg.sender == oldRecipient, "Unauthorized");
                 dist[i].recipient = newRecipient;
                 emit RecipientUpdated(contentId, oldRecipient, newRecipient);
                 return;
