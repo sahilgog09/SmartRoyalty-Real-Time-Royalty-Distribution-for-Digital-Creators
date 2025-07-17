@@ -15,47 +15,50 @@ contract SmartRoyalty {
     event RoyaltiesPaid(uint256 indexed contentId, uint256 amount);
     event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
 
+    modifier validRoyaltyInput(address[] calldata recipients, uint256[] calldata shares) {
+        uint256 len = recipients.length;
+        require(len > 0 && len == shares.length, "Input length mismatch or empty");
+        _;
+    }
+
     function setRoyalties(
         uint256 contentId,
         address[] calldata recipients,
         uint256[] calldata shares
-    ) external {
-        uint256 len = recipients.length;
-        require(len == shares.length && len > 0, "Invalid input");
+    ) external validRoyaltyInput(recipients, shares) {
+        delete royalties[contentId];
 
-        delete royalties[contentId]; // clear existing royalties
-
-        uint256 totalShare;
         RoyaltyInfo[] storage dist = royalties[contentId];
+        uint256 totalShare;
 
-        for (uint256 i = 0; i < len; ++i) {
+        for (uint256 i = 0; i < recipients.length; ++i) {
             address recipient = recipients[i];
             uint256 share = shares[i];
-            require(recipient != address(0), "Zero address");
+            require(recipient != address(0), "Recipient cannot be zero");
             totalShare += share;
-            dist.push(RoyaltyInfo({recipient: recipient, share: share}));
+            dist.push(RoyaltyInfo(recipient, share));
         }
 
-        require(totalShare == BASIS_POINTS, "Total ≠ 10000");
+        require(totalShare == BASIS_POINTS, "Total share must equal 10000");
         emit RoyaltiesSet(contentId);
     }
 
     function payRoyalties(uint256 contentId) external payable {
-        uint256 value = msg.value;
-        require(value > 0, "No payment");
+        uint256 amount = msg.value;
+        require(amount > 0, "No payment received");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
-        require(len > 0, "No royalties set");
+        require(len > 0, "Royalties not set");
 
         for (uint256 i = 0; i < len; ++i) {
             RoyaltyInfo storage r = dist[i];
-            uint256 payout = (value * r.share) / BASIS_POINTS;
+            uint256 payout = (amount * r.share) / BASIS_POINTS;
             (bool success, ) = r.recipient.call{value: payout}("");
-            require(success, "Transfer failed");
+            require(success, "Royalty transfer failed");
         }
 
-        emit RoyaltiesPaid(contentId, value);
+        emit RoyaltiesPaid(contentId, amount);
     }
 
     function getRoyalties(uint256 contentId)
@@ -81,19 +84,25 @@ contract SmartRoyalty {
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "Zero address");
+        require(newRecipient != address(0), "New recipient cannot be zero");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
 
         for (uint256 i = 0; i < len; ++i) {
             if (dist[i].recipient == oldRecipient) {
-                require(msg.sender == oldRecipient, "Unauthorized");
+                require(msg.sender == oldRecipient, "Only current recipient can update");
                 dist[i].recipient = newRecipient;
                 emit RecipientUpdated(contentId, oldRecipient, newRecipient);
                 return;
             }
         }
 
-        revert("Recipient not found");
+        revert("Old recipient not found");
     }
+
+    // Optional: catch accidental ETH transfers
+    receive() external payable {
+        revert("Use payRoyalties to send ETH");
+    }
+}
