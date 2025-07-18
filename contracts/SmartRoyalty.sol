@@ -6,7 +6,7 @@ contract SmartRoyalty {
 
     struct RoyaltyInfo {
         address recipient;
-        uint256 share;
+        uint256 share; // in basis points
     }
 
     mapping(uint256 => RoyaltyInfo[]) private royalties;
@@ -15,9 +15,9 @@ contract SmartRoyalty {
     event RoyaltiesPaid(uint256 indexed contentId, uint256 amount);
     event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
 
-    modifier validRoyaltyInput(address[] calldata recipients, uint256[] calldata shares) {
+    modifier validInput(address[] calldata recipients, uint256[] calldata shares) {
         uint256 len = recipients.length;
-        require(len > 0 && len == shares.length, "Input length mismatch or empty");
+        require(len > 0 && len == shares.length, "Invalid input");
         _;
     }
 
@@ -25,37 +25,36 @@ contract SmartRoyalty {
         uint256 contentId,
         address[] calldata recipients,
         uint256[] calldata shares
-    ) external validRoyaltyInput(recipients, shares) {
+    ) external validInput(recipients, shares) {
         delete royalties[contentId];
-
-        RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 totalShare;
+        RoyaltyInfo[] storage dist = royalties[contentId];
 
-        for (uint256 i = 0; i < recipients.length; ++i) {
+        for (uint256 i; i < recipients.length; ++i) {
             address recipient = recipients[i];
             uint256 share = shares[i];
-            require(recipient != address(0), "Recipient cannot be zero");
+            require(recipient != address(0), "Zero addr");
             totalShare += share;
-            dist.push(RoyaltyInfo(recipient, share));
+            dist.push(RoyaltyInfo({recipient: recipient, share: share}));
         }
 
-        require(totalShare == BASIS_POINTS, "Total share must equal 10000");
+        require(totalShare == BASIS_POINTS, "Invalid share total");
         emit RoyaltiesSet(contentId);
     }
 
     function payRoyalties(uint256 contentId) external payable {
         uint256 amount = msg.value;
-        require(amount > 0, "No payment received");
+        require(amount > 0, "No ETH sent");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
-        require(len > 0, "Royalties not set");
+        require(len > 0, "No royalties");
 
-        for (uint256 i = 0; i < len; ++i) {
+        for (uint256 i; i < len; ++i) {
             RoyaltyInfo storage r = dist[i];
             uint256 payout = (amount * r.share) / BASIS_POINTS;
             (bool success, ) = r.recipient.call{value: payout}("");
-            require(success, "Royalty transfer failed");
+            require(success, "Transfer failed");
         }
 
         emit RoyaltiesPaid(contentId, amount);
@@ -72,7 +71,7 @@ contract SmartRoyalty {
         recipients = new address[](len);
         shares = new uint256[](len);
 
-        for (uint256 i = 0; i < len; ++i) {
+        for (uint256 i; i < len; ++i) {
             RoyaltyInfo storage r = dist[i];
             recipients[i] = r.recipient;
             shares[i] = r.share;
@@ -84,15 +83,16 @@ contract SmartRoyalty {
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "New recipient cannot be zero");
+        require(newRecipient != address(0), "Zero addr");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
 
-        for (uint256 i = 0; i < len; ++i) {
-            if (dist[i].recipient == oldRecipient) {
-                require(msg.sender == oldRecipient, "Only current recipient can update");
-                dist[i].recipient = newRecipient;
+        for (uint256 i; i < len; ++i) {
+            RoyaltyInfo storage r = dist[i];
+            if (r.recipient == oldRecipient) {
+                require(msg.sender == oldRecipient, "Not authorized");
+                r.recipient = newRecipient;
                 emit RecipientUpdated(contentId, oldRecipient, newRecipient);
                 return;
             }
@@ -101,8 +101,7 @@ contract SmartRoyalty {
         revert("Old recipient not found");
     }
 
-    // Optional: catch accidental ETH transfers
     receive() external payable {
-        revert("Use payRoyalties to send ETH");
+        revert("Use payRoyalties");
     }
 }
