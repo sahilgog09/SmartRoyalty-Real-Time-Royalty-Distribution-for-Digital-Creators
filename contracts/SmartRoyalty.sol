@@ -9,6 +9,7 @@ contract SmartRoyalty {
         uint256 share; // in basis points
     }
 
+
     mapping(uint256 => RoyaltyInfo[]) private royalties;
 
     event RoyaltiesSet(uint256 indexed contentId);
