@@ -6,9 +6,8 @@ contract SmartRoyalty {
 
     struct RoyaltyInfo {
         address recipient;
-        uint256 share; // in basis points
+        uint96 share; // Smaller type to save gas
     }
-
 
     mapping(uint256 => RoyaltyInfo[]) private royalties;
 
@@ -17,8 +16,7 @@ contract SmartRoyalty {
     event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
 
     modifier validInput(address[] calldata recipients, uint256[] calldata shares) {
-        uint256 len = recipients.length;
-        require(len > 0 && len == shares.length, "Invalid input");
+        require(recipients.length == shares.length && recipients.length > 0, "Invalid input");
         _;
     }
 
@@ -28,34 +26,43 @@ contract SmartRoyalty {
         uint256[] calldata shares
     ) external validInput(recipients, shares) {
         delete royalties[contentId];
-        uint256 totalShare;
         RoyaltyInfo[] storage dist = royalties[contentId];
 
-        for (uint256 i; i < recipients.length; ++i) {
+        uint256 totalShare;
+        uint256 len = recipients.length;
+
+        for (uint256 i; i < len; ) {
             address recipient = recipients[i];
             uint256 share = shares[i];
-            require(recipient != address(0), "Zero addr");
+            require(recipient != address(0), "Zero address");
+            require(share <= BASIS_POINTS, "Share too high");
+
             totalShare += share;
-            dist.push(RoyaltyInfo({recipient: recipient, share: share}));
+            dist.push(RoyaltyInfo({recipient: recipient, share: uint96(share)}));
+
+            unchecked { ++i; }
         }
 
-        require(totalShare == BASIS_POINTS, "Invalid share total");
+        require(totalShare == BASIS_POINTS, "Total share ≠ 10000");
         emit RoyaltiesSet(contentId);
     }
 
     function payRoyalties(uint256 contentId) external payable {
         uint256 amount = msg.value;
-        require(amount > 0, "No ETH sent");
+        require(amount > 0, "No payment");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
         require(len > 0, "No royalties");
 
-        for (uint256 i; i < len; ++i) {
+        for (uint256 i; i < len; ) {
             RoyaltyInfo storage r = dist[i];
             uint256 payout = (amount * r.share) / BASIS_POINTS;
-            (bool success, ) = r.recipient.call{value: payout}("");
-            require(success, "Transfer failed");
+
+            (bool sent, ) = r.recipient.call{value: payout}("");
+            require(sent, "Transfer failed");
+
+            unchecked { ++i; }
         }
 
         emit RoyaltiesPaid(contentId, amount);
@@ -72,10 +79,11 @@ contract SmartRoyalty {
         recipients = new address[](len);
         shares = new uint256[](len);
 
-        for (uint256 i; i < len; ++i) {
+        for (uint256 i; i < len; ) {
             RoyaltyInfo storage r = dist[i];
             recipients[i] = r.recipient;
             shares[i] = r.share;
+            unchecked { ++i; }
         }
     }
 
@@ -84,22 +92,22 @@ contract SmartRoyalty {
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "Zero addr");
+        require(newRecipient != address(0), "New recipient zero");
 
         RoyaltyInfo[] storage dist = royalties[contentId];
         uint256 len = dist.length;
 
-        for (uint256 i; i < len; ++i) {
-            RoyaltyInfo storage r = dist[i];
-            if (r.recipient == oldRecipient) {
-                require(msg.sender == oldRecipient, "Not authorized");
-                r.recipient = newRecipient;
+        for (uint256 i; i < len; ) {
+            if (dist[i].recipient == oldRecipient) {
+                require(msg.sender == oldRecipient, "Unauthorized");
+                dist[i].recipient = newRecipient;
                 emit RecipientUpdated(contentId, oldRecipient, newRecipient);
                 return;
             }
+            unchecked { ++i; }
         }
 
-        revert("Old recipient not found");
+        revert("Recipient not found");
     }
 
     receive() external payable {
