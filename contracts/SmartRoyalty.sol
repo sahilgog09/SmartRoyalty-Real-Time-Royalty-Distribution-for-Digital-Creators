@@ -6,7 +6,7 @@ contract SmartRoyalty {
 
     struct RoyaltyInfo {
         address recipient;
-        uint96 share; // Smaller type to save gas
+        uint96 share; // Gas-efficient size
     }
 
     mapping(uint256 => RoyaltyInfo[]) private royalties;
@@ -15,8 +15,9 @@ contract SmartRoyalty {
     event RoyaltiesPaid(uint256 indexed contentId, uint256 amount);
     event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
 
-    modifier validInput(address[] calldata recipients, uint256[] calldata shares) {
-        require(recipients.length == shares.length && recipients.length > 0, "Invalid input");
+    modifier validRoyaltyInput(address[] calldata recipients, uint256[] calldata shares) {
+        uint256 len = recipients.length;
+        require(len > 0 && len == shares.length, "Invalid input lengths");
         _;
     }
 
@@ -24,41 +25,38 @@ contract SmartRoyalty {
         uint256 contentId,
         address[] calldata recipients,
         uint256[] calldata shares
-    ) external validInput(recipients, shares) {
+    ) external validRoyaltyInput(recipients, shares) {
         delete royalties[contentId];
-        RoyaltyInfo[] storage dist = royalties[contentId];
+        RoyaltyInfo[] storage list = royalties[contentId];
 
-        uint256 totalShare;
-        uint256 len = recipients.length;
+        uint256 total;
+        for (uint256 i; i < recipients.length; ) {
+            address r = recipients[i];
+            uint256 s = shares[i];
+            require(r != address(0), "Zero recipient");
+            require(s <= BASIS_POINTS, "Share overflow");
 
-        for (uint256 i; i < len; ) {
-            address recipient = recipients[i];
-            uint256 share = shares[i];
-            require(recipient != address(0), "Zero address");
-            require(share <= BASIS_POINTS, "Share too high");
-
-            totalShare += share;
-            dist.push(RoyaltyInfo({recipient: recipient, share: uint96(share)}));
+            total += s;
+            list.push(RoyaltyInfo(r, uint96(s)));
 
             unchecked { ++i; }
         }
 
-        require(totalShare == BASIS_POINTS, "Total share ≠ 10000");
+        require(total == BASIS_POINTS, "Shares must total 10000");
         emit RoyaltiesSet(contentId);
     }
 
     function payRoyalties(uint256 contentId) external payable {
         uint256 amount = msg.value;
-        require(amount > 0, "No payment");
+        require(amount > 0, "No ETH sent");
 
-        RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 len = dist.length;
-        require(len > 0, "No royalties");
+        RoyaltyInfo[] storage list = royalties[contentId];
+        uint256 len = list.length;
+        require(len > 0, "No royalty data");
 
         for (uint256 i; i < len; ) {
-            RoyaltyInfo storage r = dist[i];
+            RoyaltyInfo storage r = list[i];
             uint256 payout = (amount * r.share) / BASIS_POINTS;
-
             (bool sent, ) = r.recipient.call{value: payout}("");
             require(sent, "Transfer failed");
 
@@ -73,14 +71,14 @@ contract SmartRoyalty {
         view
         returns (address[] memory recipients, uint256[] memory shares)
     {
-        RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 len = dist.length;
+        RoyaltyInfo[] storage list = royalties[contentId];
+        uint256 len = list.length;
 
         recipients = new address[](len);
         shares = new uint256[](len);
 
         for (uint256 i; i < len; ) {
-            RoyaltyInfo storage r = dist[i];
+            RoyaltyInfo storage r = list[i];
             recipients[i] = r.recipient;
             shares[i] = r.share;
             unchecked { ++i; }
@@ -92,15 +90,15 @@ contract SmartRoyalty {
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "New recipient zero");
+        require(newRecipient != address(0), "Zero address");
 
-        RoyaltyInfo[] storage dist = royalties[contentId];
-        uint256 len = dist.length;
+        RoyaltyInfo[] storage list = royalties[contentId];
+        uint256 len = list.length;
 
         for (uint256 i; i < len; ) {
-            if (dist[i].recipient == oldRecipient) {
-                require(msg.sender == oldRecipient, "Unauthorized");
-                dist[i].recipient = newRecipient;
+            if (list[i].recipient == oldRecipient) {
+                require(msg.sender == oldRecipient, "Not authorized");
+                list[i].recipient = newRecipient;
                 emit RecipientUpdated(contentId, oldRecipient, newRecipient);
                 return;
             }
@@ -111,6 +109,6 @@ contract SmartRoyalty {
     }
 
     receive() external payable {
-        revert("Use payRoyalties");
+        revert("Use payRoyalties()");
     }
 }
