@@ -11,6 +11,8 @@ contract SmartRoyalty is Ownable {
         uint96 share;
     }
 
+
+
     mapping(uint256 => RoyaltyInfo[]) private _royalties;
 
     event RoyaltiesSet(uint256 indexed contentId);
