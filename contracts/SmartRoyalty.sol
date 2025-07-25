@@ -6,106 +6,118 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract SmartRoyalty is Ownable {
     uint256 public constant BASIS_POINTS = 10_000;
 
-    struct RoyaltyInfo {
+    struct Royalty {
         address recipient;
-        uint96 share;
+        uint96 share; // Gas-efficient: fits more into one storage slot
     }
 
+    mapping(uint256 => Royalty[]) private _royaltyInfo;
 
+    event RoyaltiesConfigured(uint256 indexed contentId);
+    event RoyaltyPaid(uint256 indexed contentId, uint256 amount);
+    event RecipientChanged(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
 
-    mapping(uint256 => RoyaltyInfo[]) private _royalties;
-
-    event RoyaltiesSet(uint256 indexed contentId);
-    event RoyaltiesPaid(uint256 indexed contentId, uint256 amount);
-    event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
-
-    modifier validInput(address[] calldata recipients, uint256[] calldata shares) {
-        uint256 len = recipients.length;
-        require(len > 0 && len == shares.length, "Invalid input lengths");
+    modifier validateInput(address[] calldata recipients, uint256[] calldata shares) {
+        require(recipients.length > 0, "No recipients");
+        require(recipients.length == shares.length, "Length mismatch");
         _;
     }
 
-    // Only contract owner can set royalties
-    function setRoyalties(
+    /**
+     * @dev Set royalty recipients and their shares for a given content ID.
+     * Only the contract owner can perform this action.
+     */
+    function configureRoyalties(
         uint256 contentId,
         address[] calldata recipients,
         uint256[] calldata shares
-    ) external onlyOwner validInput(recipients, shares) {
-        delete _royalties[contentId];
-        RoyaltyInfo[] storage entries = _royalties[contentId];
+    ) external onlyOwner validateInput(recipients, shares) {
+        delete _royaltyInfo[contentId];
+        Royalty[] storage list = _royaltyInfo[contentId];
 
-        uint256 total;
+        uint256 totalShare;
         for (uint256 i; i < recipients.length; ) {
-            address r = recipients[i];
-            uint256 s = shares[i];
-            require(r != address(0), "Zero address");
-            require(s > 0 && s <= BASIS_POINTS, "Invalid share");
+            address recipient = recipients[i];
+            uint256 share = shares[i];
 
-            total += s;
-            entries.push(RoyaltyInfo(r, uint96(s)));
+            require(recipient != address(0), "Invalid recipient");
+            require(share > 0 && share <= BASIS_POINTS, "Invalid share");
+
+            list.push(Royalty(recipient, uint96(share)));
+            totalShare += share;
 
             unchecked { ++i; }
         }
 
-        require(total == BASIS_POINTS, "Total share ≠ 10000");
-        emit RoyaltiesSet(contentId);
+        require(totalShare == BASIS_POINTS, "Total share ≠ 10000");
+        emit RoyaltiesConfigured(contentId);
     }
 
-    function payRoyalties(uint256 contentId) external payable {
-        uint256 value = msg.value;
-        require(value > 0, "No ETH sent");
+    /**
+     * @dev Pay royalties to recipients based on the amount of ETH sent.
+     */
+    function distributeRoyalties(uint256 contentId) external payable {
+        uint256 amount = msg.value;
+        require(amount > 0, "Zero value");
 
-        RoyaltyInfo[] storage entries = _royalties[contentId];
-        uint256 len = entries.length;
+        Royalty[] storage list = _royaltyInfo[contentId];
+        uint256 len = list.length;
         require(len > 0, "Royalties not set");
 
         for (uint256 i; i < len; ) {
-            RoyaltyInfo storage r = entries[i];
-            uint256 payout = (value * r.share) / BASIS_POINTS;
+            Royalty storage r = list[i];
+            uint256 payout = (amount * r.share) / BASIS_POINTS;
 
-            (bool sent, ) = r.recipient.call{value: payout}("");
-            require(sent, "Transfer failed");
+            (bool success, ) = r.recipient.call{value: payout}("");
+            require(success, "Transfer failed");
 
             unchecked { ++i; }
         }
 
-        emit RoyaltiesPaid(contentId, value);
+        emit RoyaltyPaid(contentId, amount);
     }
 
-    function getRoyalties(uint256 contentId)
+    /**
+     * @dev View royalty distribution for a specific content ID.
+     */
+    function viewRoyalties(uint256 contentId)
         external
         view
         returns (address[] memory recipients, uint256[] memory shares)
     {
-        RoyaltyInfo[] storage entries = _royalties[contentId];
-        uint256 len = entries.length;
+        Royalty[] storage list = _royaltyInfo[contentId];
+        uint256 len = list.length;
 
         recipients = new address[](len);
         shares = new uint256[](len);
 
         for (uint256 i; i < len; ) {
-            recipients[i] = entries[i].recipient;
-            shares[i] = entries[i].share;
+            recipients[i] = list[i].recipient;
+            shares[i] = list[i].share;
             unchecked { ++i; }
         }
     }
 
-    // Only owner or oldRecipient can update recipient
-    function updateRoyaltyRecipient(
+    /**
+     * @dev Update an existing recipient to a new address.
+     * Can be called by the old recipient or the contract owner.
+     */
+    function changeRecipient(
         uint256 contentId,
         address oldRecipient,
         address newRecipient
     ) external {
-        require(newRecipient != address(0), "Zero new address");
+        require(newRecipient != address(0), "New recipient is zero");
 
-        RoyaltyInfo[] storage entries = _royalties[contentId];
-        uint256 len = entries.length;
+        Royalty[] storage list = _royaltyInfo[contentId];
+        uint256 len = list.length;
 
         for (uint256 i; i < len; ) {
-            if (entries[i].recipient == oldRecipient) {
+            if (list[i].recipient == oldRecipient) {
                 require(msg.sender == oldRecipient || msg.sender == owner(), "Unauthorized");
-                entries[i].recipient = newRecipient;
-                emit RecipientUpdated(contentId, oldRecipient, newRecipient);
+                list[i].recipient = newRecipient;
+
+                emit RecipientChanged(contentId, oldRecipient, newRecipient);
                 return;
             }
             unchecked { ++i; }
@@ -114,7 +126,10 @@ contract SmartRoyalty is Ownable {
         revert("Old recipient not found");
     }
 
+    /**
+     * @dev Reject ETH sent without purpose.
+     */
     receive() external payable {
-        revert("Use payRoyalties()");
+        revert("Use distributeRoyalties()");
     }
 }
