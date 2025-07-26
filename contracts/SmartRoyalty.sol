@@ -23,6 +23,8 @@ contract SmartRoyalty is Ownable {
         _;
     }
 
+
+
     /**
      * @dev Set royalty recipients and their shares for a given content ID.
      * Only the contract owner can perform this action.
