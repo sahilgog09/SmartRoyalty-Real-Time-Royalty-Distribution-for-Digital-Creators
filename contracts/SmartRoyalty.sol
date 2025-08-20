@@ -29,6 +29,7 @@ contract SmartRoyalty is Ownable, ReentrancyGuard {
     // recipient => pending amount (pull model)
     mapping(address => uint256) public pendingWithdrawals;
 
+
     // contentId => manager allowed to configure/update that content
     mapping(uint256 => address) public contentOwner;
 
