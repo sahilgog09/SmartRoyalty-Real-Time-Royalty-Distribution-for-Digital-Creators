@@ -19,6 +19,7 @@ contract SmartRoyalty is Ownable, ReentrancyGuard, Pausable {
 
 
 
+
     // ===== Types =====
     struct Royalty {
         address recipient; // 20 bytes
