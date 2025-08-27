@@ -18,8 +18,6 @@ contract SmartRoyalty is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant BASIS_POINTS = 10_000;
 
 
-
-
     // ===== Types =====
     struct Royalty {
         address recipient; // 20 bytes
