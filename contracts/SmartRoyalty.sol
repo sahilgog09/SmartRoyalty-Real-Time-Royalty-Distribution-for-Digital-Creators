@@ -25,6 +25,7 @@ contract SmartRoyalty is Ownable, ReentrancyGuard, Pausable {
         // 10 bytes padding -> 1 slot total
     }
 
+
     // ===== Storage =====
     // contentId => splits
     mapping(uint256 => Royalty[]) private _splits;
