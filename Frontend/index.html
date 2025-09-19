@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartRoyalty - Real-Time Royalty Distribution</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>🎵 SmartRoyalty</h1>
+                <p>Real-Time Royalty Distribution for Digital Creators</p>
+            </div>
+            <div class="wallet-section">
+                <button id="connectWallet" class="btn btn-primary">Connect Wallet</button>
+                <div id="walletInfo" class="wallet-info hidden">
+                    <span id="walletAddress"></span>
+                    <span id="walletBalance"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="tab-btn active" data-tab="creator">Creator Dashboard</button>
+            <button class="tab-btn" data-tab="content">Content Management</button>
+            <button class="tab-btn" data-tab="royalty">Royalty Distribution</button>
+            <button class="tab-btn" data-tab="stats">Platform Stats</button>
+        </nav>
+
+        <!-- Creator Registration Tab -->
+        <div id="creator" class="tab-content active">
+            <div class="section">
+                <h2>Creator Registration</h2>
+                <div class="form-group">
+                    <label for="creatorName">Creator Name</label>
+                    <input type="text" id="creatorName" placeholder="Enter your creator name" required>
+                    <button id="registerCreator" class="btn btn-primary">Register as Creator</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Your Profile</h2>
+                <div id="creatorProfile" class="profile-card">
+                    <div class="profile-item">
+                        <span class="label">Name:</span>
+                        <span id="profileName">Not registered</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="label">Total Earnings:</span>
+                        <span id="profileEarnings">0 ETH</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="label">Content Count:</span>
+                        <span id="profileContentCount">0</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="label">Status:</span>
+                        <span id="profileStatus" class="status">Not Registered</span>
+                    </div>
+                </div>
+                <button id="loadProfile" class="btn btn-secondary">Load Profile</button>
+            </div>
+        </div>
+
+        <!-- Content Management Tab -->
+        <div id="content" class="tab-content">
+            <div class="section">
+                <h2>Register New Content</h2>
+                <div class="form-group">
+                    <label for="contentTitle">Content Title</label>
+                    <input type="text" id="contentTitle" placeholder="Enter content title" required>
+                    
+                    <label for="contentDescription">Description</label>
+                    <textarea id="contentDescription" placeholder="Enter content description" rows="3" required></textarea>
+                    
+                    <label for="royaltyPercentage">Royalty Percentage (0-100%)</label>
+                    <input type="number" id="royaltyPercentage" min="0" max="100" placeholder="50" required>
+                    
+                    <button id="registerContent" class="btn btn-primary">Register Content</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Your Content</h2>
+                <button id="loadContent" class="btn btn-secondary">Load My Content</button>
+                <div id="contentList" class="content-list">
+                    <!-- Content items will be dynamically loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Royalty Distribution Tab -->
+        <div id="royalty" class="tab-content">
+            <div class="section">
+                <h2>Distribute Royalty</h2>
+                <div class="form-group">
+                    <label for="contentId">Content ID</label>
+                    <input type="number" id="contentId" placeholder="Enter content ID" required>
+                    
+                    <label for="royaltyAmount">Amount (ETH)</label>
+                    <input type="number" id="royaltyAmount" step="0.001" placeholder="0.1" required>
+                    
+                    <button id="distributeRoyalty" class="btn btn-primary">Distribute Royalty</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Content Details</h2>
+                <button id="loadContentDetails" class="btn btn-secondary">Load Content Details</button>
+                <div id="contentDetails" class="content-details">
+                    <!-- Content details will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Platform Stats Tab -->
+        <div id="stats" class="tab-content">
+            <div class="section">
+                <h2>Platform Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Total Content</h3>
+                        <span id="totalContent" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Royalties</h3>
+                        <span id="totalRoyalties" class="stat-value">0 ETH</span>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Next Content ID</h3>
+                        <span id="nextContentId" class="stat-value">1</span>
+                    </div>
+                </div>
+                <button id="loadStats" class="btn btn-secondary">Refresh Stats</button>
+            </div>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="statusMessage" class="status-message hidden">
+            <span id="statusText"></span>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="loading-spinner hidden">
+            <div class="spinner"></div>
+            <p>Processing transaction...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
