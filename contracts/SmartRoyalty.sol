@@ -1,263 +1,231 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
-
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-
-
-
+pragma solidity ^0.8.19;
 
 /**
  * @title SmartRoyalty
- * @notice Pull-based royalty splitter with per-content managers.
- * - Global owner can assign a manager per contentId.
- * - Manager (or owner) configures splits for that contentId.
- * - Funders deposit ETH to a contentId; recipients withdraw later.
+ * @dev Real-Time Royalty Distribution for Digital Creators
+ * @author SmartRoyalty Team
  */
-contract SmartRoyalty is Ownable, ReentrancyGuard, Pausable {
-    // ===== Constants =====
-    uint256 public constant BASIS_POINTS = 10_000;
-
-
-    // ===== Types =====
-    struct Royalty {
-        address recipient; // 20 bytes
-        uint16 shareBps;   // 2 bytes (0..10000)
-        // 10 bytes padding -> 1 slot total
+contract SmartRoyalty {
+    
+    // Events
+    event ContentRegistered(uint256 indexed contentId, address indexed creator, string title);
+    event RoyaltyDistributed(uint256 indexed contentId, uint256 amount, uint256 timestamp);
+    event CreatorAdded(address indexed creator, string name);
+    
+    // Structures
+    struct Creator {
+        string name;
+        uint256 totalEarnings;
+        bool isRegistered;
+        uint256 contentCount;
     }
-
-
-    // ===== Storage =====
-    // contentId => splits
-    mapping(uint256 => Royalty[]) private _splits;
-
-    // recipient => owed amount (pull model)
-    mapping(address => uint256) public pendingWithdrawals;
-
-    // contentId => manager allowed to configure/update that content
-    mapping(uint256 => address) public contentOwner;
-
-    // ===== Custom errors (cheaper than strings) =====
-    error ZeroAddress();
-    error InvalidShare();
-    error LengthMismatch();
-    error NoRecipients();
-    error SharesTotalInvalid();
-    error NotConfigured();
-    error NoFunds();
-    error Unauthorized();
-    error RecipientNotFound();
-    error DuplicateRecipient();
-
-    // ===== Events =====
-    event ContentOwnerSet(uint256 indexed contentId, address indexed manager);
-    event RoyaltiesSet(uint256 indexed contentId);
-    event RoyaltiesFunded(uint256 indexed contentId, uint256 amount, uint256 distributed, uint256 remainder);
-    event RecipientUpdated(uint256 indexed contentId, address indexed oldRecipient, address indexed newRecipient);
-    event Withdrawal(address indexed account, address indexed to, uint256 amount);
-
-    // ===== Modifiers =====
-    modifier onlyManager(uint256 contentId) {
-        address manager = contentOwner[contentId];
-        if (msg.sender != owner() && msg.sender != manager) revert Unauthorized();
+    
+    struct Content {
+        uint256 id;
+        string title;
+        string description;
+        address creator;
+        uint256 royaltyPercentage; // Percentage of revenue (0-100)
+        uint256 totalEarnings;
+        uint256 registrationTime;
+        bool isActive;
+    }
+    
+    // State Variables
+    mapping(address => Creator) public creators;
+    mapping(uint256 => Content) public contents;
+    mapping(address => uint256[]) public creatorContents;
+    
+    uint256 public nextContentId = 1;
+    uint256 public totalContentCount = 0;
+    uint256 public totalRoyaltiesDistributed = 0;
+    
+    address public owner;
+    
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
         _;
     }
-
-    modifier validInput(address[] calldata recipients, uint256[] calldata shares) {
-        uint256 len = recipients.length;
-        if (len == 0) revert NoRecipients();
-        if (len != shares.length) revert LengthMismatch();
+    
+    modifier onlyRegisteredCreator() {
+        require(creators[msg.sender].isRegistered, "Creator not registered");
         _;
     }
-
-    // ===== Admin controls =====
-    function setContentOwner(uint256 contentId, address manager) external onlyOwner {
-        if (manager == address(0)) revert ZeroAddress();
-        contentOwner[contentId] = manager;
-        emit ContentOwnerSet(contentId, manager);
+    
+    modifier validContentId(uint256 _contentId) {
+        require(_contentId > 0 && _contentId < nextContentId, "Invalid content ID");
+        require(contents[_contentId].isActive, "Content is not active");
+        _;
     }
-
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
-
-    // ===== Configure splits =====
-    function setRoyalties(
-        uint256 contentId,
-        address[] calldata recipients,
-        uint256[] calldata sharesBps
-    ) external onlyManager(contentId) validInput(recipients, sharesBps) whenNotPaused {
-        delete _splits[contentId];
-        Royalty[] storage list = _splits[contentId];
-
-        uint256 total;
-        uint256 len = recipients.length;
-
-        for (uint256 i; i < len; ) {
-            address r = recipients[i];
-            uint256 s = sharesBps[i];
-
-            if (r == address(0)) revert ZeroAddress();
-            if (s == 0 || s > BASIS_POINTS) revert InvalidShare();
-
-            // prevent duplicates (O(n^2) but n is typically small)
-            for (uint256 j; j < i; ) {
-                if (recipients[j] == r) revert DuplicateRecipient();
-                unchecked { ++j; }
-            }
-
-            list.push(Royalty(r, uint16(s)));
-            total += s;
-
-            unchecked { ++i; }
+    
+    // Constructor
+    constructor() {
+        owner = msg.sender;
+    }
+    
+    /**
+     * @dev Register a new creator
+     * @param _name Creator's name
+     */
+    function registerCreator(string memory _name) external {
+        require(!creators[msg.sender].isRegistered, "Creator already registered");
+        require(bytes(_name).length > 0, "Name cannot be empty");
+        
+        creators[msg.sender] = Creator({
+            name: _name,
+            totalEarnings: 0,
+            isRegistered: true,
+            contentCount: 0
+        });
+        
+        emit CreatorAdded(msg.sender, _name);
+    }
+    
+    /**
+     * @dev Register new digital content for royalty tracking
+     * @param _title Content title
+     * @param _description Content description
+     * @param _royaltyPercentage Royalty percentage (0-100)
+     */
+    function registerContent(
+        string memory _title,
+        string memory _description,
+        uint256 _royaltyPercentage
+    ) external onlyRegisteredCreator {
+        require(bytes(_title).length > 0, "Title cannot be empty");
+        require(_royaltyPercentage <= 100, "Royalty percentage cannot exceed 100%");
+        
+        uint256 contentId = nextContentId;
+        
+        contents[contentId] = Content({
+            id: contentId,
+            title: _title,
+            description: _description,
+            creator: msg.sender,
+            royaltyPercentage: _royaltyPercentage,
+            totalEarnings: 0,
+            registrationTime: block.timestamp,
+            isActive: true
+        });
+        
+        creatorContents[msg.sender].push(contentId);
+        creators[msg.sender].contentCount++;
+        totalContentCount++;
+        nextContentId++;
+        
+        emit ContentRegistered(contentId, msg.sender, _title);
+    }
+    
+    /**
+     * @dev Distribute royalties to content creator
+     * @param _contentId ID of the content
+     */
+    function distributeRoyalty(uint256 _contentId) external payable validContentId(_contentId) {
+        require(msg.value > 0, "Amount must be greater than 0");
+        
+        Content storage content = contents[_contentId];
+        address creator = content.creator;
+        
+        uint256 royaltyAmount = (msg.value * content.royaltyPercentage) / 100;
+        uint256 platformFee = msg.value - royaltyAmount;
+        
+        // Update earnings
+        content.totalEarnings += royaltyAmount;
+        creators[creator].totalEarnings += royaltyAmount;
+        totalRoyaltiesDistributed += royaltyAmount;
+        
+        // Transfer royalty to creator
+        if (royaltyAmount > 0) {
+            payable(creator).transfer(royaltyAmount);
         }
-
-        if (total != BASIS_POINTS) revert SharesTotalInvalid();
-        emit RoyaltiesSet(contentId);
-    }
-
-    // ===== Funding (pull-based distribution) =====
-    function fundRoyalties(uint256 contentId) external payable whenNotPaused {
-        uint256 amount = msg.value;
-        if (amount == 0) revert NoFunds();
-
-        Royalty[] storage list = _splits[contentId];
-        uint256 len = list.length;
-        if (len == 0) revert NotConfigured();
-
-        uint256 distributed;
-        for (uint256 i; i < len; ) {
-            Royalty storage r = list[i];
-            uint256 payout = (amount * r.shareBps) / BASIS_POINTS;
-            if (payout != 0) {
-                pendingWithdrawals[r.recipient] += payout;
-                distributed += payout;
-            }
-            unchecked { ++i; }
+        
+        // Transfer platform fee to owner
+        if (platformFee > 0) {
+            payable(owner).transfer(platformFee);
         }
-
-        // Handle rounding dust so nothing gets stuck
-        uint256 remainder = amount - distributed;
-        if (remainder != 0) {
-            address mgr = contentOwner[contentId];
-            pendingWithdrawals[mgr == address(0) ? owner() : mgr] += remainder;
-        }
-
-        emit RoyaltiesFunded(contentId, amount, distributed, remainder);
+        
+        emit RoyaltyDistributed(_contentId, royaltyAmount, block.timestamp);
     }
-
-    // ===== Withdrawals =====
-    function withdrawRoyalties() external nonReentrant whenNotPaused {
-        _withdrawTo(msg.sender, msg.sender);
+    
+    // View Functions
+    
+    /**
+     * @dev Get creator information
+     * @param _creator Creator's address
+     */
+    function getCreator(address _creator) external view returns (
+        string memory name,
+        uint256 totalEarnings,
+        bool isRegistered,
+        uint256 contentCount
+    ) {
+        Creator memory creator = creators[_creator];
+        return (creator.name, creator.totalEarnings, creator.isRegistered, creator.contentCount);
     }
-
-    function withdrawTo(address to) external nonReentrant whenNotPaused {
-        if (to == address(0)) revert ZeroAddress();
-        _withdrawTo(msg.sender, to);
+    
+    /**
+     * @dev Get content information
+     * @param _contentId Content ID
+     */
+    function getContent(uint256 _contentId) external view returns (
+        uint256 id,
+        string memory title,
+        string memory description,
+        address creator,
+        uint256 royaltyPercentage,
+        uint256 totalEarnings,
+        uint256 registrationTime,
+        bool isActive
+    ) {
+        Content memory content = contents[_contentId];
+        return (
+            content.id,
+            content.title,
+            content.description,
+            content.creator,
+            content.royaltyPercentage,
+            content.totalEarnings,
+            content.registrationTime,
+            content.isActive
+        );
     }
-
-    function _withdrawTo(address from, address to) internal {
-        uint256 bal = pendingWithdrawals[from];
-        if (bal == 0) revert NoFunds();
-        pendingWithdrawals[from] = 0;
-
-        (bool ok, ) = to.call{value: bal}("");
-        require(ok, "Withdraw failed");
-        emit Withdrawal(from, to, bal);
+    
+    /**
+     * @dev Get all content IDs for a creator
+     * @param _creator Creator's address
+     */
+    function getCreatorContents(address _creator) external view returns (uint256[] memory) {
+        return creatorContents[_creator];
     }
-
-    // ===== Views =====
-    function getRoyalties(uint256 contentId)
-        external
-        view
-        returns (address[] memory recipients, uint256[] memory sharesBps)
-    {
-        Royalty[] storage list = _splits[contentId];
-        uint256 len = list.length;
-
-        recipients = new address[](len);
-        sharesBps = new uint256[](len);
-
-        for (uint256 i; i < len; ) {
-            Royalty storage r = list[i];
-            recipients[i] = r.recipient;
-            sharesBps[i] = r.shareBps;
-            unchecked { ++i; }
-        }
+    
+    /**
+     * @dev Get contract statistics
+     */
+    function getContractStats() external view returns (
+        uint256 totalContents,
+        uint256 totalRoyalties,
+        uint256 nextId
+    ) {
+        return (totalContentCount, totalRoyaltiesDistributed, nextContentId);
     }
-
-    /// @notice Pure preview of payouts for a given amount at current config.
-    function previewPayouts(uint256 contentId, uint256 amount)
-        external
-        view
-        returns (address[] memory recipients, uint256[] memory payouts, uint256 remainder)
-    {
-        Royalty[] storage list = _splits[contentId];
-        uint256 len = list.length;
-        if (len == 0) revert NotConfigured();
-
-        recipients = new address[](len);
-        payouts = new uint256[](len);
-
-        uint256 distributed;
-        for (uint256 i; i < len; ) {
-            Royalty storage r = list[i];
-            uint256 p = (amount * r.shareBps) / BASIS_POINTS;
-            recipients[i] = r.recipient;
-            payouts[i] = p;
-            distributed += p;
-            unchecked { ++i; }
-        }
-        remainder = amount - distributed;
+    
+    // Owner Functions
+    
+    /**
+     * @dev Emergency withdraw function (only owner)
+     */
+    function emergencyWithdraw() external onlyOwner {
+        payable(owner).transfer(address(this).balance);
     }
-
-    // ===== Maintenance =====
-    function updateRecipient(
-        uint256 contentId,
-        address oldRecipient,
-        address newRecipient
-    ) external whenNotPaused {
-        if (newRecipient == address(0)) revert ZeroAddress();
-
-        Royalty[] storage list = _splits[contentId];
-        uint256 len = list.length;
-        if (len == 0) revert NotConfigured();
-
-        bool callerAuthorized = (msg.sender == oldRecipient) ||
-                                (msg.sender == owner()) ||
-                                (msg.sender == contentOwner[contentId]);
-        if (!callerAuthorized) revert Unauthorized();
-
-        for (uint256 i; i < len; ) {
-            if (list[i].recipient == oldRecipient) {
-                // prevent accidental duplication
-                if (newRecipient != oldRecipient) {
-                    for (uint256 j; j < len; ) {
-                        if (list[j].recipient == newRecipient) revert DuplicateRecipient();
-                        unchecked { ++j; }
-                    }
-                }
-
-                list[i].recipient = newRecipient;
-
-                // migrate any credited balance
-                uint256 owed = pendingWithdrawals[oldRecipient];
-                if (owed != 0) {
-                    pendingWithdrawals[oldRecipient] = 0;
-                    pendingWithdrawals[newRecipient] += owed;
-                }
-
-                emit RecipientUpdated(contentId, oldRecipient, newRecipient);
-                return;
-            }
-            unchecked { ++i; }
-        }
-
-        revert RecipientNotFound();
-    }
-
-    // Disallow blind ETH sends
-    receive() external payable {
-        revert("Use fundRoyalties()");
+    
+    /**
+     * @dev Transfer ownership (only owner)
+     * @param _newOwner New owner address
+     */
+    function transferOwnership(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "New owner cannot be zero address");
+        owner = _newOwner;
     }
 }
