@@ -12,7 +12,8 @@ contract SmartRoyalty {
     event ContentRegistered(uint256 indexed contentId, address indexed creator, string title);
     event RoyaltyDistributed(uint256 indexed contentId, uint256 amount, uint256 timestamp);
     event CreatorAdded(address indexed creator, string name);
-    
+
+
     // Structures
     struct Creator {
         string name;
