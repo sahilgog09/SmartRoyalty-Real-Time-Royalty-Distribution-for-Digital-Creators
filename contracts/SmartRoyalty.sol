@@ -2,7 +2,6 @@
 pragma solidity ^0.8.19;
 
 
-
 /**
  * @title SmartRoyalty
  * @dev Real-Time Royalty Distribution for Digital Creators
