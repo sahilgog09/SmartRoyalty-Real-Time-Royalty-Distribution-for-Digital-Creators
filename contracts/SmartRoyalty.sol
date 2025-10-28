@@ -9,6 +9,7 @@ pragma solidity ^0.8.19;
 contract SmartRoyalty {
 
 
+
     // Events
     event ContentRegistered(uint256 indexed contentId, address indexed creator, string title);
     event RoyaltyDistributed(uint256 indexed contentId, uint256 amount, uint256 timestamp);
